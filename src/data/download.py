@@ -78,12 +78,45 @@ NON_PLANET_STARS = [
     "KIC 12644822",
 ]
 
+
+def extract_flux(lc, seq_len):
+    """
+    Safely extracts a plain numpy float32 array from a lightkurve object.
+
+    lightkurve returns flux as an astropy MaskedColumn or MaskedNDArray.
+    Calling .value on it gives a numpy MaskedArray — not a plain ndarray.
+    Masked positions contain fill values that look like real numbers but
+    corrupt normalization and model training silently.
+
+    Fix:
+        .filled(np.nan)  — replaces masked positions with NaN explicitly
+        preprocess.fill_gaps() then handles those NaNs via interpolation
+
+    Without this fix: masked values appear as ~1e20 or similar garbage,
+    which pulls the min/max of normalization to absurd ranges and makes
+    every curve look flat after normalization.
+    """
+    raw = lc.flux.value   # may be numpy MaskedArray
+
+    # Convert MaskedArray → plain ndarray, masked positions become NaN
+    if isinstance(raw, np.ma.MaskedArray):
+        raw = raw.filled(np.nan)
+
+    # Ensure plain float32 ndarray regardless of input type
+    flux = np.array(raw, dtype=np.float32)
+
+    if len(flux) < seq_len:
+        return None
+
+    return flux[:seq_len]
+
+
 def download_one(star_name, label, out_dir, seq_len=1024):
     """
-    Downloads ALL available Kepler quarters for a star.
-    Each quarter saved as a separate .npy file with quarter index in name.
-    Skips files that already exist — safe to re-run after partial failures.
-    Returns count of files saved.
+    Downloads ALL available Kepler quarters for one star.
+    Each quarter saved as a separate .npy file.
+    Skips files that already exist — safe to re-run.
+    Returns count of files successfully saved.
     """
     safe_name = star_name.replace(" ", "_")
 
@@ -106,19 +139,21 @@ def download_one(star_name, label, out_dir, seq_len=1024):
             try:
                 lc   = result.download()
                 lc   = lc.remove_nans().normalize()
-                flux = lc.flux.value.astype(np.float32)
-                if len(flux) < seq_len:
-                    log.warning(f"{star_name} Q{i}: only {len(flux)} points, skipping")
+                flux = extract_flux(lc, seq_len)
+
+                if flux is None:
+                    log.warning(f"{star_name} Q{i}: too short, skipping")
                     continue
-                flux = flux[:seq_len]
+
                 np.save(out_path, flux)
                 saved += 1
+
             except Exception as e:
                 log.warning(f"{star_name} Q{i}: {e}")
                 continue
 
         if saved > 0:
-            log.info(f"{star_name}: saved {saved} quarters")
+            log.info(f"{star_name}: {saved} quarters saved")
         return saved
 
     except Exception as e:
@@ -129,7 +164,6 @@ def download_one(star_name, label, out_dir, seq_len=1024):
 def download_all(out_dir="data/raw", seq_len=1024):
     os.makedirs(out_dir, exist_ok=True)
 
-    # Deduplicate lists at runtime — safety net
     planets    = list(dict.fromkeys(CONFIRMED_PLANETS))
     nonplanets = list(dict.fromkeys(NON_PLANET_STARS))
 
@@ -157,12 +191,11 @@ def download_all(out_dir="data/raw", seq_len=1024):
     log.info(f"Done — {total_saved} quarter files saved, "
              f"{total_failed} stars failed entirely.")
 
-    # Final count
-    all_files  = os.listdir(out_dir)
-    n_planet   = sum(1 for f in all_files if "label1" in f)
-    n_noplant  = sum(1 for f in all_files if "label0" in f)
-    log.info(f"data/raw summary — planet: {n_planet}, non-planet: {n_noplant}, "
-             f"total: {len(all_files)}")
+    all_files = os.listdir(out_dir)
+    n_planet  = sum(1 for f in all_files if "label1" in f)
+    n_noplant = sum(1 for f in all_files if "label0" in f)
+    log.info(f"data/raw summary — planet: {n_planet}, "
+             f"non-planet: {n_noplant}, total: {len(all_files)}")
 
 
 if __name__ == "__main__":
