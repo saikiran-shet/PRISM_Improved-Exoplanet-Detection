@@ -50,7 +50,7 @@ print(f"  OK — shape={sample.shape}, dtype={sample.dtype}, "
 
 # ── Step 3: Check dataset loads and injects correctly ────────────────────────
 print("\n[3/7] Building dataset with 10 injections...")
-from src.data.dataset import PRISMDataset, get_dataloaders
+from src.data.dataset import get_dataloaders
 
 try:
     train_loader, val_loader, test_loader = get_dataloaders(
@@ -104,11 +104,11 @@ except Exception as e:
     print(f"  FAIL: Forward pass crashed: {e}")
     sys.exit(1)
 
-assert z_s.shape  == (4, 64),     f"  FAIL: z_s shape {z_s.shape}"
-assert z_t.shape  == (4, 64),     f"  FAIL: z_t shape {z_t.shape}"
-assert S_t.shape  == (4, 1, 1024),f"  FAIL: S_t shape {S_t.shape}"
-assert T_t.shape  == (4, 1, 1024),f"  FAIL: T_t shape {T_t.shape}"
-assert prob.shape == (4, 1),      f"  FAIL: prob shape {prob.shape}"
+assert z_s.shape  == (4, 64),      f"  FAIL: z_s shape {z_s.shape}"
+assert z_t.shape  == (4, 64),      f"  FAIL: z_t shape {z_t.shape}"
+assert S_t.shape  == (4, 1, 1024), f"  FAIL: S_t shape {S_t.shape}"
+assert T_t.shape  == (4, 1, 1024), f"  FAIL: T_t shape {T_t.shape}"
+assert prob.shape == (4, 1),       f"  FAIL: prob shape {prob.shape}"
 assert prob.min() >= 0.0 and prob.max() <= 1.0, \
     f"  FAIL: prob outside [0,1] — {prob.min():.4f} to {prob.max():.4f}"
 
@@ -122,8 +122,12 @@ print(f"  OK — Total parameters: {total_params:,}")
 print("\n[5/7] Testing all four losses...")
 from src.losses import build_losses
 
-n_pos      = sum(1 for _, l in train_loader.dataset.samples if l == 1.0)
-n_neg      = len(train_loader.dataset.samples) - n_pos
+# Subset wraps PRISMDataset — access underlying dataset via .dataset
+full_train_dataset = train_loader.dataset.dataset
+all_samples        = full_train_dataset.samples
+
+n_pos      = sum(1 for _, l in all_samples if l == 1.0)
+n_neg      = sum(1 for _, l in all_samples if l == 0.0)
 pos_weight = n_neg / n_pos if n_pos > 0 else 1.0
 
 try:
@@ -136,18 +140,23 @@ except Exception as e:
 x_l      = torch.rand(4, 1, 1024)
 labels_l = torch.tensor([1.0, 0.0, 1.0, 0.0])
 z_s_l, z_t_l = enc(x_l)
-S_t_l    = s_dec(z_s_l)
-T_t_l    = t_dec(z_t_l)
-prob_l   = clf(z_t_l)
+S_t_l        = s_dec(z_s_l)
+T_t_l        = t_dec(z_t_l)
+prob_l       = clf(z_t_l)
 
 try:
-    l_recon          = losses['recon'](x_l, S_t_l, T_t_l)
-    l_mi             = losses['mine'](z_s_l, z_t_l)
-    l_phys, l_ma, l_tv = losses['physics'](S_t_l, T_t_l)
-    l_cls            = losses['classify'](prob_l, labels_l)
+    l_recon             = losses['recon'](x_l, S_t_l, T_t_l)
+    l_mi                = losses['mine'](z_s_l, z_t_l)
+    l_phys, l_ma, l_tv  = losses['physics'](S_t_l, T_t_l)
+    l_cls               = losses['classify'](prob_l, labels_l)
 except Exception as e:
     print(f"  FAIL: Loss computation crashed: {e}")
     sys.exit(1)
+
+assert np.isfinite(l_recon.item()), "FAIL: L_recon is NaN/Inf"
+assert np.isfinite(l_mi.item()),    "FAIL: L_MI is NaN/Inf"
+assert np.isfinite(l_phys.item()),  "FAIL: L_phys is NaN/Inf"
+assert np.isfinite(l_cls.item()),   "FAIL: L_classify is NaN/Inf"
 
 print(f"  OK — L_recon   : {l_recon.item():.4f}")
 print(f"  OK — L_MI      : {l_mi.item():.4f}")
@@ -199,10 +208,10 @@ print(f"  OK — Epoch 1: train={e1['train_total']:.4f} "
 print(f"  OK — Epoch 2: train={e2['train_total']:.4f} "
       f"val={e2['val_total']:.4f} acc={e2['val_accuracy']:.3f}")
 
-# Check losses are finite
 for key in ['train_recon', 'train_mi', 'train_phys', 'train_cls']:
     val = e1[key]
-    assert np.isfinite(val), f"  FAIL: {key}={val} is not finite (NaN/Inf)"
+    assert np.isfinite(val), \
+        f"  FAIL: {key}={val} is not finite (NaN/Inf)"
 print("  OK — All loss values are finite (no NaN/Inf)")
 
 # ── Step 7: Check checkpoint was saved ───────────────────────────────────────
@@ -218,7 +227,7 @@ required_keys = ['encoder', 'stellar_decoder',
 for k in required_keys:
     assert k in ckpt, f"  FAIL: Missing key '{k}' in checkpoint"
 
-print(f"  OK — Checkpoint found at {ckpt_path}")
+print(f"  OK — Checkpoint found: {ckpt_path}")
 print(f"  OK — Keys: {list(ckpt.keys())}")
 print(f"  OK — Saved at epoch {ckpt['epoch']}, "
       f"val_loss={ckpt['val_loss']:.4f}")
