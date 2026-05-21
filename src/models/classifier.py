@@ -18,16 +18,16 @@ class PRISMClassifier(nn.Module):
         super().__init__()
 
         self.classifier = nn.Sequential(
-            nn.Linear(latent_dim, hidden_dim),
+            nn.Linear(latent_dim, 64),   # was 128
             nn.ReLU(),
-            nn.Dropout(p=dropout_p),
+            nn.Dropout(p=0.5),           # was 0.3 — more aggressive
 
-            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.Linear(64, 32),           # was 64
             nn.ReLU(),
-            nn.Dropout(p=dropout_p),
+            nn.Dropout(p=0.5),
 
-            nn.Linear(hidden_dim // 2, 1),
-            nn.Sigmoid()             # ← must be here — output in [0, 1]
+            nn.Linear(32, 1),
+            nn.Sigmoid()
         )
 
     def forward(self, z_t):

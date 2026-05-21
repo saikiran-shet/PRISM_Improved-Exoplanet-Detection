@@ -35,12 +35,12 @@ class PRISMDecoder(nn.Module):
         super().__init__()
 
         # The encoder bottleneck is (256 channels, seq_len/16 time steps)
-        self.bottleneck_channels = 256
+        self.bottleneck_channels = 128
         self.bottleneck_len      = seq_len // 16   # 1024 // 16 = 64
 
         # ── Linear expansion from latent space to bottleneck ─────────────────
         self.fc = nn.Sequential(
-            nn.Linear(latent_dim, 256),
+            nn.Linear(latent_dim, 128),
             nn.ReLU(),
             nn.Linear(256, self.bottleneck_channels * self.bottleneck_len),
             nn.ReLU(),
@@ -50,24 +50,20 @@ class PRISMDecoder(nn.Module):
         # Each block doubles sequence length, halves channels
         # (B, 256, 64) → (B, 128, 128) → (B, 64, 256) → (B, 32, 512) → (B, 1, 1024)
         self.upsampler = nn.Sequential(
-            # Block 1: 64 → 128
-            nn.ConvTranspose1d(256, 128, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-
-            # Block 2: 128 → 256
             nn.ConvTranspose1d(128, 64, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm1d(64),
             nn.ReLU(),
 
-            # Block 3: 256 → 512
             nn.ConvTranspose1d(64, 32, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm1d(32),
             nn.ReLU(),
 
-            # Block 4: 512 → 1024, collapse to 1 output channel
-            nn.ConvTranspose1d(32, out_channels, kernel_size=4, stride=2, padding=1),
-            nn.Sigmoid(),   # output in [0, 1]
+            nn.ConvTranspose1d(32, 16, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm1d(16),
+            nn.ReLU(),
+
+            nn.ConvTranspose1d(16, out_channels, kernel_size=4, stride=2, padding=1),
+            nn.Sigmoid(),
         )
 
     def forward(self, z):

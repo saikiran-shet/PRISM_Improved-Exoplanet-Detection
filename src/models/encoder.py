@@ -38,29 +38,29 @@ class PRISMEncoder(nn.Module):
         # kernel_size=7 captures ~7 cadence (~2hr) local patterns
         # padding=3 keeps length stable before pooling
         self.backbone = nn.Sequential(
-            # Block 1: (B, 1,   1024) → (B, 32,  512)
-            nn.Conv1d(in_channels, 32, kernel_size=7, padding=3),
-            nn.BatchNorm1d(32),
-            nn.ReLU(),
-            nn.MaxPool1d(2),
+            # Block 1: (B, 1, 1024) → (B, 16, 512)
+                nn.Conv1d(in_channels, 16, kernel_size=7, padding=3),
+                nn.BatchNorm1d(16),
+                nn.ReLU(),
+                nn.MaxPool1d(2),
 
-            # Block 2: (B, 32,  512) → (B, 64,  256)
-            nn.Conv1d(32, 64, kernel_size=7, padding=3),
-            nn.BatchNorm1d(64),
-            nn.ReLU(),
-            nn.MaxPool1d(2),
+                # Block 2: (B, 16, 512) → (B, 32, 256)
+                nn.Conv1d(16, 32, kernel_size=7, padding=3),
+                nn.BatchNorm1d(32),
+                nn.ReLU(),
+                nn.MaxPool1d(2),
 
-            # Block 3: (B, 64,  256) → (B, 128, 128)
-            nn.Conv1d(64, 128, kernel_size=5, padding=2),
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-            nn.MaxPool1d(2),
+                # Block 3: (B, 32, 256) → (B, 64, 128)
+                nn.Conv1d(32, 64, kernel_size=5, padding=2),
+                nn.BatchNorm1d(64),
+                nn.ReLU(),
+                nn.MaxPool1d(2),
 
-            # Block 4: (B, 128, 128) → (B, 256, 64)
-            nn.Conv1d(128, 256, kernel_size=3, padding=1),
-            nn.BatchNorm1d(256),
-            nn.ReLU(),
-            nn.MaxPool1d(2),
+                # Block 4: (B, 64, 128) → (B, 128, 64)
+                nn.Conv1d(64, 128, kernel_size=3, padding=1),
+                nn.BatchNorm1d(128),
+                nn.ReLU(),
+                nn.MaxPool1d(2),
         )
 
         # Compute flattened size dynamically — robust to seq_len changes
@@ -69,16 +69,15 @@ class PRISMEncoder(nn.Module):
         # ── Dual latent heads ────────────────────────────────────────────────
         # z_s head: stellar activity — learns slow, smooth variability patterns
         self.stellar_head = nn.Sequential(
-            nn.Linear(flat_size, 256),
-            nn.ReLU(),
-            nn.Linear(256, latent_dim)
+        nn.Linear(flat_size, 128),   # was 256
+        nn.ReLU(),
+        nn.Linear(128, latent_dim)
         )
 
-        # z_t head: transit signal — learns sharp, localized dip patterns
         self.transit_head = nn.Sequential(
-            nn.Linear(flat_size, 256),
+            nn.Linear(flat_size, 128),   # was 256
             nn.ReLU(),
-            nn.Linear(256, latent_dim)
+            nn.Linear(128, latent_dim)
         )
 
     def _get_flat_size(self, in_channels, seq_len):
