@@ -15,67 +15,62 @@ log = logging.getLogger(__name__)
 
 
 DEFAULT_CFG = dict(
-    # Architecture
     latent_dim   = 64,
     seq_len      = 1024,
     dropout_p    = 0.3,
-
-    # Data
     n_injections = 500,
     batch_size   = 32,
     val_split    = 0.15,
     test_split   = 0.15,
-
-    # Training
     epochs       = 150,
     patience     = 15,
     lr_prism     = 1e-4,
-    lr_mine      = 1e-4,       # lowered from 5e-4 — prevents MINE oscillation
-
-    # Loss lambda weights
+    lr_mine      = 1e-4,
     lambda_recon = 1.0,
     lambda_mi    = 0.1,
     lambda_phys  = 0.1,
     lambda_cls   = 1.0,
-
-    # MINE steps per batch — 1 keeps MINE and PRISM in sync
     mine_steps   = 1,
-
-    # Paths
     ckpt_dir     = "outputs/checkpoints",
     proc_dir     = "data/processed",
 )
 
 
-def compute_pos_weight(dataset):
+def compute_pos_weight(train_loader):
     """
-    Computes BCE pos_weight from the training dataset.
+    Computes BCE pos_weight from the training DataLoader.
+
+    train_loader.dataset is a Subset (from random_split).
+    Subset wraps PRISMDataset — access via .dataset to get samples.
+
     pos_weight = n_negative / n_positive
-
-    This down-weights the majority planet class so the classifier
-    can't cheat by always predicting 'planet'.
-
-    Called ONCE before training starts, not inside the batch loop.
+    Passed into ClassifierLoss to down-weight majority planet class.
+    Called ONCE before training — never inside the batch loop.
     """
-    labels  = [l for _, l in dataset.samples]
-    n_pos   = sum(labels)
-    n_neg   = len(labels) - n_pos
+    # Unwrap Subset → PRISMDataset → samples list
+    full_dataset = train_loader.dataset.dataset
+    all_samples  = full_dataset.samples
+
+    # Only count samples that are actually in this split
+    # using the Subset indices
+    subset_indices = train_loader.dataset.indices
+    subset_labels  = [all_samples[i][1] for i in subset_indices]
+
+    n_pos = sum(1 for l in subset_labels if l == 1.0)
+    n_neg = sum(1 for l in subset_labels if l == 0.0)
+
     if n_pos == 0:
+        log.warning("No positive samples in training set — pos_weight set to 1.0")
         return 1.0
+
     weight = n_neg / n_pos
-    log.info(f"Class balance — planet: {int(n_pos)}, "
-             f"no-planet: {int(n_neg)}, pos_weight: {weight:.4f}")
+    log.info(f"Class balance — planet: {n_pos}, "
+             f"no-planet: {n_neg}, pos_weight: {weight:.4f}")
     return weight
 
 
 def train_one_epoch(models, losses, prism_opt, mine_opt,
                     loader, device, cfg, epoch):
-    """
-    One full pass over the training set.
-
-    Step 1 per batch: Update MINENetwork only (maximize MI bound).
-    Step 2 per batch: Update PRISM (minimize weighted total loss).
-    """
     enc   = models['encoder'].train()
     s_dec = models['stellar_decoder'].train()
     t_dec = models['transit_decoder'].train()
@@ -88,17 +83,17 @@ def train_one_epoch(models, losses, prism_opt, mine_opt,
         x      = x.to(device)
         labels = labels.to(device)
 
-        # ── Step 1: Update MINENetwork (gradient ascent on MI estimate) ──────
+        # Step 1 — Update MINENetwork (maximize MI bound)
         for _ in range(cfg['mine_steps']):
             mine_opt.zero_grad()
             with torch.no_grad():
                 z_s, z_t = enc(x)
             mi_est    = losses['mine'](z_s.detach(), z_t.detach())
-            mine_loss = -mi_est          # negate → ascent becomes descent
+            mine_loss = -mi_est
             mine_loss.backward()
             mine_opt.step()
 
-        # ── Step 2: Update PRISM (minimize total loss) ───────────────────────
+        # Step 2 — Update PRISM (minimize total loss)
         prism_opt.zero_grad()
 
         z_s, z_t           = enc(x)
@@ -146,10 +141,6 @@ def train_one_epoch(models, losses, prism_opt, mine_opt,
 
 @torch.no_grad()
 def validate(models, losses, loader, device, cfg):
-    """
-    Validation pass — no gradient updates.
-    Computes total loss and accuracy.
-    """
     enc   = models['encoder'].eval()
     s_dec = models['stellar_decoder'].eval()
     t_dec = models['transit_decoder'].eval()
@@ -192,7 +183,6 @@ def validate(models, losses, loader, device, cfg):
 
 
 def save_checkpoint(models, losses, epoch, val_loss, cfg, tag="best"):
-    """Saves all model + loss states to a single checkpoint file."""
     os.makedirs(cfg['ckpt_dir'], exist_ok=True)
     path = os.path.join(cfg['ckpt_dir'], f"prism_{tag}.pt")
     torch.save(dict(
@@ -209,7 +199,6 @@ def save_checkpoint(models, losses, epoch, val_loss, cfg, tag="best"):
 
 
 def load_checkpoint(path, device='cpu'):
-    """Restores full PRISM model from checkpoint. Returns models, losses, cfg."""
     ckpt   = torch.load(path, map_location=device)
     cfg    = ckpt['cfg']
     models = build_prism(latent_dim=cfg['latent_dim'],
@@ -229,16 +218,6 @@ def load_checkpoint(path, device='cpu'):
 
 
 def train(cfg=None):
-    """
-    Main training entry point.
-
-    Flow:
-        1. Build dataloaders
-        2. Compute pos_weight from training set
-        3. Build models and losses (with correct pos_weight)
-        4. Build two separate optimizers
-        5. Epoch loop — train → validate → checkpoint → early stop
-    """
     if cfg is None:
         cfg = DEFAULT_CFG
 
@@ -254,20 +233,18 @@ def train(cfg=None):
         test_split   = cfg['test_split'],
     )
 
-    # ── pos_weight from actual training data — computed ONCE here ─────────────
-    pos_weight = compute_pos_weight(train_loader.dataset)
+    # ── pos_weight — computed from actual training split indices ──────────────
+    pos_weight = compute_pos_weight(train_loader)
 
-    # ── Models ────────────────────────────────────────────────────────────────
+    # ── Models + Losses ───────────────────────────────────────────────────────
     models = build_prism(latent_dim = cfg['latent_dim'],
                          seq_len    = cfg['seq_len'],
                          dropout_p  = cfg['dropout_p'])
 
-    # ── Losses — pass pos_weight into classifier loss ─────────────────────────
-    losses = build_losses(latent_dim  = cfg['latent_dim'],
-                          seq_len     = cfg['seq_len'],
-                          pos_weight  = pos_weight)
+    losses = build_losses(latent_dim = cfg['latent_dim'],
+                          seq_len    = cfg['seq_len'],
+                          pos_weight = pos_weight)
 
-    # Move to device
     for m in models.values():
         m.to(device)
     for l in losses.values():
