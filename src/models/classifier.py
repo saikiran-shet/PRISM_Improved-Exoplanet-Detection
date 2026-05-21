@@ -43,8 +43,7 @@ class PRISMClassifier(nn.Module):
             nn.Dropout(p=dropout_p),
 
             # Layer 3: hidden_dim/2 → 1 probability
-            nn.Linear(hidden_dim // 2, 1),
-            nn.Sigmoid()
+            nn.Linear(hidden_dim // 2, 1)
         )
 
     def forward(self, z_t):

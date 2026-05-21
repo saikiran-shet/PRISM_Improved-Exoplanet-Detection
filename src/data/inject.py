@@ -31,11 +31,11 @@ def sample_transit_params(rng):
     ecc  : eccentricity — zero (circular orbit, simplest case)
     w    : longitude of periastron — irrelevant for circular but batman needs it
     """
-    rp  = rng.uniform(0.05, 0.15)
-    a   = rng.uniform(5.0, 20.0)
-    inc = rng.uniform(85.0, 90.0)
-    t0  = rng.uniform(1.0, 5.0)
-    per = rng.uniform(3.0, 15.0)
+    rp  = rng.uniform(0.03, 0.20)    # wider range — smaller planets too
+    a   = rng.uniform(3.0,  40.0)    # longer orbits
+    inc = rng.uniform(83.0, 90.0)
+    t0  = rng.uniform(0.5,  8.0)
+    per = rng.uniform(2.0,  20.0)    # wider period range
     return dict(rp=rp, a=a, inc=inc, t0=t0, per=per, ecc=0.0, w=90.0)
 
 def inject_transit(flux, rng=None, seq_len=1024, cadence_days=0.0204):
@@ -83,7 +83,7 @@ def inject_transit(flux, rng=None, seq_len=1024, cadence_days=0.0204):
 
     return injected.astype(np.float32), p
 
-def batch_inject(raw_curves, n_injections=500, seed=42):
+def batch_inject(raw_curves, n_injections=2000, seed=42):
     """
     Takes a list of clean (label=0) light curves, generates n_injections
     synthetic planet curves by randomly picking a base curve and injecting.

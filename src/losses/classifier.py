@@ -26,22 +26,14 @@ class ClassifierLoss(nn.Module):
 
     def __init__(self, pos_weight=1.0):
         super().__init__()
-        # pos_weight > 1.0 penalizes missing planets more than false alarms
+        # pos_weight < 1 down-weights the planet class
+        # 98 non-planet / 542 planet = 0.18
         pw = torch.tensor([pos_weight])
-        self.bce = nn.BCELoss(weight=None)   # we handle weighting manually
-        self.pos_weight = pos_weight
+        self.bce = nn.BCEWithLogitsLoss(pos_weight=pw)
 
     def forward(self, prob, labels):
-        """
-        prob   : (B, 1) — model output, already sigmoid'd
-        labels : (B,)   — ground truth 0.0 or 1.0
-        """
-        labels = labels.view(-1, 1)          # (B, 1) to match prob shape
-        # Clamp prob to avoid log(0) numerical issues
-        prob   = prob.clamp(1e-7, 1 - 1e-7)
-        loss   = -(labels * torch.log(prob) * self.pos_weight
-                   + (1 - labels) * torch.log(1 - prob))
-        return loss.mean()
+        labels = labels.view(-1, 1)
+        return self.bce(prob, labels)
 
 
 if __name__ == "__main__":
