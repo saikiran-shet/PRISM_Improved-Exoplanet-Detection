@@ -3,6 +3,7 @@ import numpy as np
 import os
 import logging
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -81,7 +82,7 @@ NON_PLANET_STARS = [
 
 def extract_flux(lc, seq_len):
     """
-    Converts lightkurve MaskedNDArray to plain float32 numpy array.
+    Converts lightkurve MaskedNDArray → plain float32 numpy array.
     Masked positions become NaN — handled by preprocess.fill_gaps() later.
     """
     raw = lc.flux.value
@@ -93,64 +94,88 @@ def extract_flux(lc, seq_len):
     return flux[:seq_len]
 
 
-def download_one(star_name, label, out_dir, seq_len=1024):
+def download_one(args):
     """
-    Downloads ONE quarter (the first available) for a star.
-    Fast — one HTTP request per star.
-    Skips if file already exists.
-    Returns True on success, False on failure.
+    Downloads ONE quarter (first available) for a single star.
+    Takes a tuple (star_name, label, out_dir, seq_len) — required
+    for ThreadPoolExecutor which passes a single argument.
+    Returns (star_name, True/False).
     """
+    star_name, label, out_dir, seq_len = args
     safe_name = star_name.replace(" ", "_")
     out_path  = os.path.join(out_dir, f"{safe_name}_label{label}.npy")
 
     if os.path.exists(out_path):
-        return True
+        return star_name, True
 
     try:
         results = lk.search_lightcurve(
             star_name, mission="Kepler", author="Kepler"
         )
         if len(results) == 0:
-            log.warning(f"No data found: {star_name}")
-            return False
+            return star_name, False
 
-        lc   = results[0].download()        # only Q0 — fast
+        lc   = results[0].download()
         lc   = lc.remove_nans().normalize()
         flux = extract_flux(lc, seq_len)
 
         if flux is None:
-            log.warning(f"{star_name}: too short, skipping")
-            return False
+            return star_name, False
 
         np.save(out_path, flux)
-        log.info(f"Saved → {out_path}")
-        return True
+        return star_name, True
 
     except Exception as e:
-        log.error(f"Failed {star_name}: {e}")
-        return False
+        log.warning(f"{star_name}: {e}")
+        return star_name, False
 
 
-def download_all(out_dir="data/raw", seq_len=1024):
+def download_all(out_dir="data/raw", seq_len=1024, max_workers=6):
+    """
+    Downloads all stars in parallel using a thread pool.
+
+    max_workers=6 means 6 stars download simultaneously.
+    Don't go above 8 — MAST starts rejecting requests.
+
+    ThreadPoolExecutor is used (not ProcessPoolExecutor) because
+    the bottleneck is network I/O, not CPU — threads are ideal here.
+    While one thread waits for a server response, others continue.
+    """
     os.makedirs(out_dir, exist_ok=True)
 
     planets    = list(dict.fromkeys(CONFIRMED_PLANETS))
     nonplanets = list(dict.fromkeys(NON_PLANET_STARS))
 
-    log.info(f"Planet hosts    : {len(planets)} unique stars")
-    log.info(f"Non-planet stars: {len(nonplanets)} unique stars")
+    # Build full task list: (star_name, label, out_dir, seq_len)
+    tasks = (
+        [(s, 1, out_dir, seq_len) for s in planets] +
+        [(s, 0, out_dir, seq_len) for s in nonplanets]
+    )
+
+    log.info(f"Total stars     : {len(tasks)}")
+    log.info(f"Parallel workers: {max_workers}")
+    log.info(f"Estimated time  : {len(tasks) // max_workers * 5 // 60} min "
+             f"(~5s per star)")
 
     ok = fail = 0
 
-    log.info("── Planet hosts (label=1) ──")
-    for star in tqdm(planets, desc="Planets"):
-        result = download_one(star, 1, out_dir, seq_len)
-        ok += result; fail += not result
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(download_one, t): t[0] for t in tasks}
 
-    log.info("── Non-planet stars (label=0) ──")
-    for star in tqdm(nonplanets, desc="Non-planets"):
-        result = download_one(star, 0, out_dir, seq_len)
-        ok += result; fail += not result
+        for future in tqdm(as_completed(futures),
+                           total=len(futures),
+                           desc="Downloading stars"):
+            star_name = futures[future]
+            try:
+                _, success = future.result()
+                if success:
+                    ok += 1
+                else:
+                    fail += 1
+                    log.warning(f"Failed: {star_name}")
+            except Exception as e:
+                fail += 1
+                log.error(f"Exception {star_name}: {e}")
 
     log.info(f"Done — {ok} saved, {fail} failed.")
 
@@ -158,7 +183,8 @@ def download_all(out_dir="data/raw", seq_len=1024):
     n_planet  = sum(1 for f in all_files if "label1" in f)
     n_noplant = sum(1 for f in all_files if "label0" in f)
     log.info(f"Summary — planet: {n_planet}, "
-             f"non-planet: {n_noplant}, total: {len(all_files)}")
+             f"non-planet: {n_noplant}, "
+             f"total: {len(all_files)}")
 
 
 if __name__ == "__main__":
