@@ -7,14 +7,12 @@ def build_losses(latent_dim=64, seq_len=1024,
                  lambda_tv=0.1, pos_weight=1.0):
     """
     Instantiates all four losses.
-    Returns a dict used directly in the training loop.
-
-    Lambda weights (how much each loss contributes to total):
-        Set in train.py — not here. These are just the loss objects.
+    pos_weight passed to ClassifierLoss to handle class imbalance.
+    Computed from actual training data in train.py — never hardcoded.
     """
     return dict(
-        recon   = ReconstructionLoss(),
-        mine    = MINELoss(latent_dim=latent_dim),
-        physics = PhysicsLoss(seq_len=seq_len, lambda_tv=lambda_tv),
+        recon    = ReconstructionLoss(),
+        mine     = MINELoss(latent_dim=latent_dim),
+        physics  = PhysicsLoss(seq_len=seq_len, lambda_tv=lambda_tv),
         classify = ClassifierLoss(pos_weight=pos_weight),
     )
