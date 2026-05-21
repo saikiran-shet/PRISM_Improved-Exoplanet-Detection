@@ -81,84 +81,54 @@ NON_PLANET_STARS = [
 
 def extract_flux(lc, seq_len):
     """
-    Safely extracts a plain numpy float32 array from a lightkurve object.
-
-    lightkurve returns flux as an astropy MaskedColumn or MaskedNDArray.
-    Calling .value on it gives a numpy MaskedArray — not a plain ndarray.
-    Masked positions contain fill values that look like real numbers but
-    corrupt normalization and model training silently.
-
-    Fix:
-        .filled(np.nan)  — replaces masked positions with NaN explicitly
-        preprocess.fill_gaps() then handles those NaNs via interpolation
-
-    Without this fix: masked values appear as ~1e20 or similar garbage,
-    which pulls the min/max of normalization to absurd ranges and makes
-    every curve look flat after normalization.
+    Converts lightkurve MaskedNDArray to plain float32 numpy array.
+    Masked positions become NaN — handled by preprocess.fill_gaps() later.
     """
-    raw = lc.flux.value   # may be numpy MaskedArray
-
-    # Convert MaskedArray → plain ndarray, masked positions become NaN
+    raw = lc.flux.value
     if isinstance(raw, np.ma.MaskedArray):
         raw = raw.filled(np.nan)
-
-    # Ensure plain float32 ndarray regardless of input type
     flux = np.array(raw, dtype=np.float32)
-
     if len(flux) < seq_len:
         return None
-
     return flux[:seq_len]
 
 
 def download_one(star_name, label, out_dir, seq_len=1024):
     """
-    Downloads ALL available Kepler quarters for one star.
-    Each quarter saved as a separate .npy file.
-    Skips files that already exist — safe to re-run.
-    Returns count of files successfully saved.
+    Downloads ONE quarter (the first available) for a star.
+    Fast — one HTTP request per star.
+    Skips if file already exists.
+    Returns True on success, False on failure.
     """
     safe_name = star_name.replace(" ", "_")
+    out_path  = os.path.join(out_dir, f"{safe_name}_label{label}.npy")
+
+    if os.path.exists(out_path):
+        return True
 
     try:
         results = lk.search_lightcurve(
             star_name, mission="Kepler", author="Kepler"
         )
         if len(results) == 0:
-            log.warning(f"No Kepler data found for {star_name}")
-            return 0
+            log.warning(f"No data found: {star_name}")
+            return False
 
-        saved = 0
-        for i, result in enumerate(results):
-            out_path = os.path.join(
-                out_dir, f"{safe_name}_q{i}_label{label}.npy"
-            )
-            if os.path.exists(out_path):
-                saved += 1
-                continue
-            try:
-                lc   = result.download()
-                lc   = lc.remove_nans().normalize()
-                flux = extract_flux(lc, seq_len)
+        lc   = results[0].download()        # only Q0 — fast
+        lc   = lc.remove_nans().normalize()
+        flux = extract_flux(lc, seq_len)
 
-                if flux is None:
-                    log.warning(f"{star_name} Q{i}: too short, skipping")
-                    continue
+        if flux is None:
+            log.warning(f"{star_name}: too short, skipping")
+            return False
 
-                np.save(out_path, flux)
-                saved += 1
-
-            except Exception as e:
-                log.warning(f"{star_name} Q{i}: {e}")
-                continue
-
-        if saved > 0:
-            log.info(f"{star_name}: {saved} quarters saved")
-        return saved
+        np.save(out_path, flux)
+        log.info(f"Saved → {out_path}")
+        return True
 
     except Exception as e:
         log.error(f"Failed {star_name}: {e}")
-        return 0
+        return False
 
 
 def download_all(out_dir="data/raw", seq_len=1024):
@@ -170,31 +140,24 @@ def download_all(out_dir="data/raw", seq_len=1024):
     log.info(f"Planet hosts    : {len(planets)} unique stars")
     log.info(f"Non-planet stars: {len(nonplanets)} unique stars")
 
-    total_saved = total_failed = 0
+    ok = fail = 0
 
-    log.info("── Downloading planet hosts (label=1) ──")
+    log.info("── Planet hosts (label=1) ──")
     for star in tqdm(planets, desc="Planets"):
-        n = download_one(star, 1, out_dir, seq_len)
-        if n > 0:
-            total_saved += n
-        else:
-            total_failed += 1
+        result = download_one(star, 1, out_dir, seq_len)
+        ok += result; fail += not result
 
-    log.info("── Downloading non-planet stars (label=0) ──")
+    log.info("── Non-planet stars (label=0) ──")
     for star in tqdm(nonplanets, desc="Non-planets"):
-        n = download_one(star, 0, out_dir, seq_len)
-        if n > 0:
-            total_saved += n
-        else:
-            total_failed += 1
+        result = download_one(star, 0, out_dir, seq_len)
+        ok += result; fail += not result
 
-    log.info(f"Done — {total_saved} quarter files saved, "
-             f"{total_failed} stars failed entirely.")
+    log.info(f"Done — {ok} saved, {fail} failed.")
 
     all_files = os.listdir(out_dir)
     n_planet  = sum(1 for f in all_files if "label1" in f)
     n_noplant = sum(1 for f in all_files if "label0" in f)
-    log.info(f"data/raw summary — planet: {n_planet}, "
+    log.info(f"Summary — planet: {n_planet}, "
              f"non-planet: {n_noplant}, total: {len(all_files)}")
 
 
