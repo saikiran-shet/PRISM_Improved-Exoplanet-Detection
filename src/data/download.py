@@ -5,85 +5,24 @@ import logging
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
-CONFIRMED_PLANETS = [
-    "Kepler-10", "Kepler-22", "Kepler-62", "Kepler-69", "Kepler-442",
-    "Kepler-452", "Kepler-186", "Kepler-438", "Kepler-296", "Kepler-174",
-    "Kepler-61",  "Kepler-283", "Kepler-395", "Kepler-430", "Kepler-444",
-    "Kepler-20",  "Kepler-42",  "Kepler-55",  "Kepler-80",  "Kepler-90",
-    "Kepler-11",  "Kepler-18",  "Kepler-25",  "Kepler-30",  "Kepler-37",
-    "Kepler-48",  "Kepler-50",  "Kepler-51",  "Kepler-56",  "Kepler-60",
-    "Kepler-65",  "Kepler-68",  "Kepler-79",  "Kepler-84",  "Kepler-88",
-    "Kepler-93",  "Kepler-94",  "Kepler-95",  "Kepler-96",  "Kepler-97",
-    "Kepler-98",  "Kepler-99",  "Kepler-100", "Kepler-101", "Kepler-102",
-    "Kepler-103", "Kepler-106", "Kepler-109", "Kepler-113", "Kepler-131",
-]
 
-NON_PLANET_STARS = [
-    "KIC 1026032",  "KIC 1161620",  "KIC 1164678",  "KIC 1296413",
-    "KIC 1431060",  "KIC 1571511",  "KIC 1618690",  "KIC 1720554",
-    "KIC 1873174",  "KIC 1995732",  "KIC 2010607",  "KIC 2010809",
-    "KIC 2021174",  "KIC 2141150",  "KIC 2159783",  "KIC 2166460",
-    "KIC 2281485",  "KIC 2302548",  "KIC 2304168",  "KIC 2438113",
-    "KIC 2444412",  "KIC 2557168",  "KIC 2571238",  "KIC 2694810",
-    "KIC 2714077",  "KIC 2720563",  "KIC 2836292",  "KIC 2853038",
-    "KIC 2968789",  "KIC 2987027",  "KIC 3100219",  "KIC 3102916",
-    "KIC 3114667",  "KIC 3230491",  "KIC 3231341",  "KIC 3239945",
-    "KIC 3326428",  "KIC 3340573",  "KIC 3352751",  "KIC 3441784",
-    "KIC 3442055",  "KIC 3456181",  "KIC 3543333",  "KIC 3559650",
-    "KIC 3641726",  "KIC 3642335",  "KIC 3731676",  "KIC 3733346",
-    "KIC 3831454",  "KIC 3832474",  "KIC 3934529",  "KIC 3936357",
-    "KIC 4043190",  "KIC 4045571",  "KIC 4049084",  "KIC 4077526",
-    "KIC 4144800",  "KIC 4169400",  "KIC 4243274",  "KIC 4243461",
-    "KIC 4244082",  "KIC 4349452",  "KIC 4350554",  "KIC 4453041",
-    "KIC 4455365",  "KIC 4472818",  "KIC 4570949",  "KIC 4574987",
-    "KIC 4663622",  "KIC 4664609",  "KIC 4758368",  "KIC 4760618",
-    "KIC 4851217",  "KIC 4853438",  "KIC 4913852",  "KIC 4914923",
-    "KIC 5008189",  "KIC 5009475",  "KIC 5080652",  "KIC 5097598",
-    "KIC 5098444",  "KIC 5128972",  "KIC 5164255",  "KIC 5165605",
-    "KIC 5213466",  "KIC 5214740",  "KIC 5301750",  "KIC 5358241",
-    "KIC 5359613",  "KIC 5444504",  "KIC 5445790",  "KIC 5450764",
-    "KIC 5536555",  "KIC 5537861",  "KIC 5612566",  "KIC 5613330",
-    "KIC 5614616",  "KIC 5653126",  "KIC 5735762",  "KIC 5736988",
-    "KIC 5812701",  "KIC 5813977",  "KIC 5866724",  "KIC 5951458",
-    "KIC 6028116",  "KIC 6062088",  "KIC 6106415",  "KIC 6196457",
-    "KIC 6268648",  "KIC 6289240",  "KIC 6381562",  "KIC 6425957",
-    "KIC 6508221",  "KIC 6587001",  "KIC 6665695",  "KIC 6706048",
-    "KIC 6862328",  "KIC 6923953",  "KIC 7009496",  "KIC 7103006",
-    "KIC 7199397",  "KIC 7206837",  "KIC 7300184",  "KIC 7341231",
-    "KIC 7419318",  "KIC 7433192",  "KIC 7519888",  "KIC 7582608",
-    "KIC 7668648",  "KIC 7700622",  "KIC 7771531",  "KIC 7848385",
-    "KIC 7943602",  "KIC 8011334",  "KIC 8077137",  "KIC 8150320",
-    "KIC 8211096",  "KIC 8292840",  "KIC 8349582",  "KIC 8394721",
-    "KIC 8460208",  "KIC 8493142",  "KIC 8494142",  "KIC 8586756",
-    "KIC 8631743",  "KIC 8738735",  "KIC 8804455",  "KIC 8866102",
-    "KIC 8936174",  "KIC 9002278",  "KIC 9016693",  "KIC 9082860",
-    "KIC 9150827",  "KIC 9210192",  "KIC 9305831",  "KIC 9410930",
-    "KIC 9475552",  "KIC 9532126",  "KIC 9573350",  "KIC 9595827",
-    "KIC 9656919",  "KIC 9704149",  "KIC 9706819",  "KIC 9757613",
-    "KIC 9836441",  "KIC 9941859",  "KIC 10019708", "KIC 10074700",
-    "KIC 10124866", "KIC 10196240", "KIC 10264660", "KIC 10319385",
-    "KIC 10386984", "KIC 10453521", "KIC 10514430", "KIC 10592770",
-    "KIC 10656508", "KIC 10660165", "KIC 10723994", "KIC 10789273",
-    "KIC 10858716", "KIC 10925104", "KIC 10990886", "KIC 11074933",
-    "KIC 11144556", "KIC 11189959", "KIC 11240260", "KIC 11295426",
-    "KIC 11304458", "KIC 11401755", "KIC 11403216", "KIC 11453592",
-    "KIC 11497958", "KIC 11551692", "KIC 11557439", "KIC 11617378",
-    "KIC 11661210", "KIC 11709832", "KIC 11769022", "KIC 11820830",
-    "KIC 11874676", "KIC 11918099", "KIC 11969129", "KIC 12066749",
-    "KIC 12110942", "KIC 12156048", "KIC 12202140", "KIC 12252424",
-    "KIC 12255108", "KIC 12303549", "KIC 12368972", "KIC 12417799",
-    "KIC 12470053", "KIC 12507577", "KIC 12554589", "KIC 12599700",
-    "KIC 12644822",
-]
+def load_kic_list(filepath, max_stars=None):
+    """Loads KIC IDs from a text file, one per line."""
+    with open(filepath) as f:
+        kics = [int(line.strip()) for line in f if line.strip()]
+    if max_stars:
+        kics = kics[:max_stars]
+    return kics
 
 
 def extract_flux(lc, seq_len):
     """
     Converts lightkurve MaskedNDArray → plain float32 numpy array.
-    Masked positions become NaN — handled by preprocess.fill_gaps() later.
+    Masked positions become NaN — handled by preprocess.fill_gaps().
     """
     raw = lc.flux.value
     if isinstance(raw, np.ma.MaskedArray):
@@ -96,89 +35,106 @@ def extract_flux(lc, seq_len):
 
 def download_one(args):
     """
-    Downloads ONE quarter (first available) for a single star.
-    Takes a tuple (star_name, label, out_dir, seq_len) — required
-    for ThreadPoolExecutor which passes a single argument.
-    Returns (star_name, True/False).
+    Downloads one quarter for one KIC star.
+    Args tuple: (kic_id, label, out_dir, seq_len)
+    Returns (kic_id, True/False).
     """
-    star_name, label, out_dir, seq_len = args
-    safe_name = star_name.replace(" ", "_")
+    kic_id, label, out_dir, seq_len = args
+    star_name = f"KIC {kic_id}"
+    safe_name = f"KIC_{kic_id}"
     out_path  = os.path.join(out_dir, f"{safe_name}_label{label}.npy")
 
     if os.path.exists(out_path):
-        return star_name, True
+        return kic_id, True
 
     try:
         results = lk.search_lightcurve(
             star_name, mission="Kepler", author="Kepler"
         )
         if len(results) == 0:
-            return star_name, False
+            return kic_id, False
 
         lc   = results[0].download()
         lc   = lc.remove_nans().normalize()
         flux = extract_flux(lc, seq_len)
 
         if flux is None:
-            return star_name, False
+            return kic_id, False
 
         np.save(out_path, flux)
-        return star_name, True
+        return kic_id, True
 
     except Exception as e:
-        log.warning(f"{star_name}: {e}")
-        return star_name, False
+        log.warning(f"KIC {kic_id}: {e}")
+        return kic_id, False
 
 
-def download_all(out_dir="data/raw", seq_len=1024, max_workers=6):
+def download_all(
+    confirmed_file   = "confirmed_kics.txt",
+    false_pos_file   = "false_positive_kics.txt",
+    out_dir          = "data/raw",
+    seq_len          = 1024,
+    max_confirmed    = 500,    # how many planet stars to download
+    max_false_pos    = 500,    # how many non-planet stars to download
+    max_workers      = 6,      # parallel threads — don't exceed 8
+):
     """
-    Downloads all stars in parallel using a thread pool.
+    Downloads light curves from NASA-vetted Kepler KOI catalog.
 
-    max_workers=6 means 6 stars download simultaneously.
-    Don't go above 8 — MAST starts rejecting requests.
+    Balanced download: equal numbers of confirmed planets
+    and false positives → no class imbalance from the start.
 
-    ThreadPoolExecutor is used (not ProcessPoolExecutor) because
-    the bottleneck is network I/O, not CPU — threads are ideal here.
-    While one thread waits for a server response, others continue.
+    max_confirmed and max_false_pos control how many you download.
+    Start with 500 each (1000 total) for a meaningful dataset.
+    Increase to 1000 each once you confirm the pipeline works.
     """
     os.makedirs(out_dir, exist_ok=True)
 
-    planets    = list(dict.fromkeys(CONFIRMED_PLANETS))
-    nonplanets = list(dict.fromkeys(NON_PLANET_STARS))
+    # Load KIC lists
+    if not os.path.exists(confirmed_file):
+        log.error(f"Missing {confirmed_file}. Run fetch_catalog.py first.")
+        return
+    if not os.path.exists(false_pos_file):
+        log.error(f"Missing {false_pos_file}. Run fetch_catalog.py first.")
+        return
 
-    # Build full task list: (star_name, label, out_dir, seq_len)
+    confirmed_kics = load_kic_list(confirmed_file,  max_stars=max_confirmed)
+    false_pos_kics  = load_kic_list(false_pos_file,  max_stars=max_false_pos)
+
+    log.info(f"Confirmed planets to download  : {len(confirmed_kics)}")
+    log.info(f"False positives to download    : {len(false_pos_kics)}")
+    log.info(f"Parallel workers               : {max_workers}")
+
+    # Build task list
     tasks = (
-        [(s, 1, out_dir, seq_len) for s in planets] +
-        [(s, 0, out_dir, seq_len) for s in nonplanets]
+        [(kic, 1, out_dir, seq_len) for kic in confirmed_kics] +
+        [(kic, 0, out_dir, seq_len) for kic in false_pos_kics]
     )
 
-    log.info(f"Total stars     : {len(tasks)}")
-    log.info(f"Parallel workers: {max_workers}")
-    log.info(f"Estimated time  : {len(tasks) // max_workers * 5 // 60} min "
-             f"(~5s per star)")
-
-    ok = fail = 0
+    ok = fail = skipped = 0
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(download_one, t): t[0] for t in tasks}
-
+        futures = {
+            executor.submit(download_one, t): t[0]
+            for t in tasks
+        }
         for future in tqdm(as_completed(futures),
                            total=len(futures),
-                           desc="Downloading stars"):
-            star_name = futures[future]
+                           desc="Downloading"):
+            kic_id = futures[future]
             try:
                 _, success = future.result()
                 if success:
                     ok += 1
                 else:
                     fail += 1
-                    log.warning(f"Failed: {star_name}")
             except Exception as e:
                 fail += 1
-                log.error(f"Exception {star_name}: {e}")
+                log.error(f"KIC {kic_id}: {e}")
 
     log.info(f"Done — {ok} saved, {fail} failed.")
 
+    # Summary
     all_files = os.listdir(out_dir)
     n_planet  = sum(1 for f in all_files if "label1" in f)
     n_noplant = sum(1 for f in all_files if "label0" in f)
@@ -188,4 +144,8 @@ def download_all(out_dir="data/raw", seq_len=1024, max_workers=6):
 
 
 if __name__ == "__main__":
-    download_all()
+    download_all(
+        max_confirmed = 500,
+        max_false_pos = 500,
+        max_workers   = 6,
+    )
