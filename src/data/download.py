@@ -74,8 +74,8 @@ def download_all(
     false_pos_file   = "false_positive_kics.txt",
     out_dir          = "data/raw",
     seq_len          = 1024,
-    max_confirmed    = 500,    # how many planet stars to download
-    max_false_pos    = 500,    # how many non-planet stars to download
+    max_confirmed    = 3000,    # how many planet stars to download
+    max_false_pos    = 3000,    # how many non-planet stars to download
     max_workers      = 6,      # parallel threads — don't exceed 8
 ):
     """
@@ -145,7 +145,7 @@ def download_all(
 
 if __name__ == "__main__":
     download_all(
-        max_confirmed = 500,
-        max_false_pos = 500,
+        max_confirmed = 3000,
+        max_false_pos = 3000,
         max_workers   = 6,
     )
